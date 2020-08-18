@@ -1,0 +1,5 @@
+.idea/
+DeployCommands.txt
+test.py
+coherence_ua.egg-info/
+venv/*

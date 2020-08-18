@@ -1,0 +1,2 @@
+recursive-include coherence_ua/models/*
+include coherence_ua/models/weights/*
