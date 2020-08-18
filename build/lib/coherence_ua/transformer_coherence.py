@@ -5,9 +5,9 @@ import tensorflow_datasets as tfds
 import pathlib
 from os.path import join
 import ufal.udpipe
-import os
 
 
+# Multihead attention class
 class MultiHeadAttention(tf.keras.layers.Layer):
     def __init__(self, d_model, num_heads):
         super(MultiHeadAttention, self).__init__()
@@ -58,6 +58,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         return output, attention_weights
 
 
+# Encoder layer
 class EncoderLayer(tf.keras.layers.Layer):
     def __init__(self, d_model, num_heads, dff, rate=0.1):
         super(EncoderLayer, self).__init__()
@@ -84,6 +85,7 @@ class EncoderLayer(tf.keras.layers.Layer):
         return out2
 
 
+# Encoder object that consists of embedding, positional encoding and a number of Encoder layers
 class Encoder(tf.keras.layers.Layer):
     def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size,
                  maximum_position_encoding, rate=0.1):
@@ -118,17 +120,31 @@ class Encoder(tf.keras.layers.Layer):
         return x  # (batch_size, input_seq_len, d_model)
 
 
+# Coherence model that performs the estimation of the coherence of the given text
 class CoherenceModel:
+
+    # Deep learning model to estimate the coherence of a clique
     model = None
+
+    # Number of sentences that each clique contains
     clique_length = 3
 
     def __init__(self):
+
+        # Set current folder in order to load all necessary models
         self.current_folder = join(pathlib.Path(__file__).parent.absolute(), "models")
+
+        # Load a tokenizer to transform sentences into vectors
         self.tokenizer_sentence = tfds.features.text.SubwordTextEncoder.load_from_file(
             join(self.current_folder, 'vocab'))
+
+        # Load a Transformer-based neural network model
         self.load_model()
+
+        # Load a Ukrainian dependency model to preprocess an input text
         self.language_model = UniversalDependencyModel(join(self.current_folder, 'ukrainian-iu-ud-2.3-181115.udpipe'))
 
+    # Init a Transformer-based neural network model and load corresponding weights
     def load_model(self):
         num_layers = 4
         dff = 512
@@ -139,15 +155,22 @@ class CoherenceModel:
         self.model = TransformerCoherence(num_layers, embedding_dim, num_heads, dff, vocab_size, dropout_rate)
         self.model.load_weights(join(self.current_folder, "weights", "chk-2-0.0917-0.8678"))
 
+    # Preprocess input text in order to pass it to the neural network model
     def preprocess_text(self, text):
         MAX_LENGTH = 30
 
         # Split the text into sentences
         sentences = self.language_model.tokenize(text)
         document = []
+
+        # Loop through each sentence, split them into word, perform lemmatization
         for s in sentences:
+
+            # Parse each sentence to retrieve lemma
             self.language_model.tag(s)
             self.language_model.parse(s)
+
+            # Collect all lemmas into one list
             i = 0
             words = []
             while i < len(s.words):
@@ -155,43 +178,59 @@ class CoherenceModel:
                 i += 1
             document.append(" ".join(words[1:]))
 
+        # Convert sentences into the set of numbers according to the loaded tokenizer
         sequences = tf.keras.preprocessing.sequence.pad_sequences(
             [self.tokenizer_sentence.encode(sentence) for sentence in document], maxlen=MAX_LENGTH, value=0)
         return sequences
 
+    # Get probabilities for the set of the cliques of the given text
     def get_prediction_series(self, text):
 
+        # Convert the text into sequences
         sequences = self.preprocess_text(text)
 
+        # Init samples list
         x_samples = []
 
+        # Set an initial counter
         counter = self.clique_length - 1
 
+        # Don't allow to process short texts
         if self.clique_length > len(sequences):
             return np.array([0])
 
+        # Loop through the text
         while counter < len(sequences):
+
+            # Form a clique
             x_sample = []
             for i in range(counter - self.clique_length, counter):
                 x_sample.append(sequences[i])
             counter += 1
             x_samples.append(x_sample)
 
+        # Prepare input data for the NN model
         inputs = np.array(x_samples)
 
+        # Form encoding padding masks for the inputs
         enc_padding_masks = [create_padding_mask(inputs[:, 0, :]), create_padding_mask(inputs[:, 1, :]),
                              create_padding_mask(inputs[:, 2, :])]
+
+        # Return the output of the model
         return self.model(inputs, False, enc_padding_masks)
 
+    # Calculate the coherence of the text as the product of the probabilities of cliques
     def evaluate_coherence_as_product(self, text):
         return tf.math.reduce_prod(self.get_prediction_series(text)).numpy()
 
+    # Calculate the coherence of the text as the ratio of a number of coherent cliques over all cliques
+    # according to the corresponding threshold
     def evaluate_coherence_using_threshold(self, text, threshold=0.25):
         predictions = self.get_prediction_series(text)
         predictions = [1 if output > threshold else 0 for output in predictions]
         return np.sum(predictions) / len(predictions)
 
-
+# Deep NN model that is based on the Transformer architecture
 class TransformerCoherence(Model):
 
     def __init__(self, num_layers, embedding_dim, num_heads, dff, vocab_size, dropout_rate, **kwargs):
