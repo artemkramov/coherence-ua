@@ -135,7 +135,7 @@ class CoherenceModel:
         self.current_folder = join(pathlib.Path(__file__).parent.absolute(), "models")
 
         # Load a tokenizer to transform sentences into vectors
-        self.tokenizer_sentence = tfds.features.text.SubwordTextEncoder.load_from_file(
+        self.tokenizer_sentence = tfds.deprecated.text.SubwordTextEncoder.load_from_file(
             join(self.current_folder, 'vocab'))
 
         # Load a Transformer-based neural network model
